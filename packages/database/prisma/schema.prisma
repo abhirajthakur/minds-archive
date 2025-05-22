@@ -1,6 +1,6 @@
 generator client {
   provider = "prisma-client-js"
-  output   = "../generated/prisma"
+  output   = "../generated/client"
 }
 
 datasource db {
@@ -37,6 +37,7 @@ model Document {
   id             String                 @id @default(cuid())
   content        String                 @db.Text
   name           String
+  size           Int // In bytes
   vector         Unsupported("vector")?
   conversation   Conversation?          @relation(fields: [conversationId], references: [id])
   conversationId String?
