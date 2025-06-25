@@ -2,6 +2,7 @@ import cors from "cors";
 import express, { Request, Response } from "express";
 import multer from "multer";
 import { storeDocument } from "./services/storeDocument";
+import { queryDocument } from "./services/queryDocument";
 
 const PORT = process.env.PORT || 8080;
 
@@ -32,6 +33,16 @@ app.post(
 		});
 	},
 );
+
+app.post("/api/chat", async (req: Request, res: Response) => {
+	const { conversationId, query } = req.body;
+	const result = await queryDocument(conversationId, query);
+
+	res.setHeader("Content-Type", "text/event-stream");
+	res.setHeader("Cache-Control", "no-cache");
+	res.setHeader("Connection", "keep-alive");
+	result.pipe(res);
+});
 
 app.listen(PORT, () => {
 	console.log(`Server is running on port ${PORT}`);
