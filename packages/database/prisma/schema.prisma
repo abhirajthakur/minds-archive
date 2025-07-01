@@ -26,11 +26,19 @@ model User {
 
 model Conversation {
   id        String     @id @default(cuid())
-  content   String     @db.Text
-  name      String
   documents Document[]
+  messages  Message[]
   user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId    String
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  content        String       @db.Text
+  role           Role
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  conversationId String
 }
 
 model Document {
@@ -38,6 +46,7 @@ model Document {
   content        String                 @db.Text
   name           String
   size           Int // In bytes
+  updatedAt      DateTime               @default(now())
   vector         Unsupported("vector")?
   conversation   Conversation?          @relation(fields: [conversationId], references: [id])
   conversationId String?
@@ -86,4 +95,9 @@ model Verification {
   updatedAt  DateTime?
 
   @@map("verification")
+}
+
+enum Role {
+  USER
+  SYSTEM
 }
