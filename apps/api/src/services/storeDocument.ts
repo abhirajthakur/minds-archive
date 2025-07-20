@@ -5,10 +5,13 @@ import { PPTXLoader } from "@langchain/community/document_loaders/fs/pptx";
 import { PrismaVectorStore } from "@langchain/community/vectorstores/prisma";
 import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
 import { Document, Prisma, prisma } from "@workspace/database";
-import "dotenv/config";
 import { BufferLoader } from "langchain/document_loaders/fs/buffer";
 import { TextLoader } from "langchain/document_loaders/fs/text";
 import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
+import fs from "fs";
+import os from "os";
+import path from "path";
+import "dotenv/config";
 
 export const getVectorStore = (): PrismaVectorStore<
   Document,
@@ -34,19 +37,39 @@ export const getVectorStore = (): PrismaVectorStore<
 };
 
 const getFileLoader = (
-  file: Express.Multer.File,
+  tempFilePath: string,
+  mimetype: string,
 ): BufferLoader | TextLoader => {
-  const { mimetype, path } = file;
-
   switch (mimetype) {
     case "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-      return new PPTXLoader(path);
+      return new PPTXLoader(tempFilePath);
     case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-      return new DocxLoader(path);
+      return new DocxLoader(tempFilePath);
     case "application/pdf":
-      return new PDFLoader(path);
+      return new PDFLoader(tempFilePath);
     default:
-      return new TextLoader(path);
+      return new TextLoader(tempFilePath);
+  }
+};
+
+const createTempFile = async (
+  buffer: Buffer,
+  originalName: string,
+): Promise<string> => {
+  const tempDir = os.tmpdir();
+  const fileExtension = path.extname(originalName);
+  const tempFileName = `temp-${Date.now()}-${Math.random().toString(36).substring(7)}${fileExtension}`;
+  const tempFilePath = path.join(tempDir, tempFileName);
+
+  await fs.promises.writeFile(tempFilePath, buffer);
+  return tempFilePath;
+};
+
+const cleanupTempFile = async (filePath: string): Promise<void> => {
+  try {
+    await fs.promises.unlink(filePath);
+  } catch (error) {
+    console.warn(`Failed to cleanup temp file ${filePath}:`, error);
   }
 };
 
@@ -56,42 +79,60 @@ const processFile = async (
   vectorStore: PrismaVectorStore<Document, "Document", any, any>,
   conversationId?: string,
 ): Promise<Document[]> => {
-  const loader = getFileLoader(file);
-  const rawDocs = await loader.load();
+  let tempFilePath: string | null = null;
 
-  if (rawDocs.length === 0) {
-    console.warn(`No content found in ${file.originalname}`);
-    return [];
+  try {
+    console.log(`Processing ${file.originalname}...`);
+
+    tempFilePath = await createTempFile(file.buffer, file.originalname);
+
+    const loader = getFileLoader(tempFilePath, file.mimetype);
+    const rawDocs = await loader.load();
+
+    if (rawDocs.length === 0) {
+      console.warn(`No content found in ${file.originalname}`);
+      return [];
+    }
+
+    const splitter = new RecursiveCharacterTextSplitter({
+      chunkSize: 1000,
+      chunkOverlap: 100,
+    });
+
+    const chunks = await splitter.splitDocuments(rawDocs);
+    const validChunks = chunks.filter((doc) => doc.pageContent?.trim());
+
+    if (validChunks.length === 0) {
+      console.warn(`No valid chunks in ${file.originalname}`);
+      return [];
+    }
+
+    const savedDocs = await prisma.$transaction(
+      validChunks.map((chunk) =>
+        prisma.document.create({
+          data: {
+            name: file.originalname,
+            content: chunk.pageContent,
+            size: file.size,
+            conversationId: conversationId || null,
+          },
+        }),
+      ),
+    );
+
+    await vectorStore.addModels(savedDocs);
+    console.log(
+      `Successfully processed ${file.originalname} into ${savedDocs.length} chunks`,
+    );
+    return savedDocs;
+  } catch (error) {
+    console.error(`Error processing file ${file.originalname}:`, error);
+    throw error;
+  } finally {
+    if (tempFilePath) {
+      await cleanupTempFile(tempFilePath);
+    }
   }
-
-  const splitter = new RecursiveCharacterTextSplitter({
-    chunkSize: 1000,
-    chunkOverlap: 100,
-  });
-
-  const chunks = await splitter.splitDocuments(rawDocs);
-  const validChunks = chunks.filter((doc) => doc.pageContent?.trim());
-
-  if (validChunks.length === 0) {
-    console.warn(`No valid chunks in ${file.originalname}`);
-    return [];
-  }
-
-  const savedDocs = await prisma.$transaction(
-    validChunks.map((chunk) =>
-      prisma.document.create({
-        data: {
-          name: file.originalname,
-          content: chunk.pageContent,
-          size: file.size,
-          conversationId: conversationId || null,
-        },
-      }),
-    ),
-  );
-
-  await vectorStore.addModels(savedDocs);
-  return savedDocs;
 };
 
 export const storeDocuments = async (

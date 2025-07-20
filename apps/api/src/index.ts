@@ -7,18 +7,14 @@ import { storeDocuments } from "./services/storeDocument";
 
 const PORT = process.env.PORT || 8080;
 
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, "uploads/");
-  },
-  filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, `${uniqueSuffix}-${file.originalname}`);
+const app = express();
+// Use memory storage to handle file uploads in memory before sending to Cloudinary
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB file size limit
   },
 });
-
-const app = express();
-const upload = multer({ storage: storage });
 
 app.use(express.json());
 app.use(cors());
