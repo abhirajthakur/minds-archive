@@ -48,18 +48,33 @@ pnpm install
 
 ### 3. Environment Setup
 
-Create a `.env` file in the root directory:
+Set up environment variables for each component:
 
+#### Frontend (apps/web)
+Create `apps/web/.env.local`:
 ```env
-# Database
-DATABASE_URL="postgresql://username:password@localhost:5432/minds_archive"
+# API Configuration
+NEXT_PUBLIC_API_URL=http://localhost:8080
+```
 
+#### Backend API (apps/api)
+Create `apps/api/.env`:
+```env
 # Google AI API Key
-GOOGLE_API_KEY="your-google-ai-api-key"
+GOOGLE_API_KEY=your-google-ai-api-key
 
 # Server Configuration
 PORT=8080
 ```
+
+#### Database (packages/database)
+Create `packages/database/.env`:
+```env
+# Database URL
+DATABASE_URL=postgresql://username:password@localhost:5432/minds_archive
+```
+
+**Note**: You can copy the `.env.example` files in each directory and rename them to `.env` (or `.env.local` for the web app), then update the values accordingly.
 
 ### 4. Start the Database
 
