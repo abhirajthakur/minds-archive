@@ -594,7 +594,7 @@ export default function ChatPage() {
         }
 
         // Load existing conversation
-        const response = await fetch(`http://localhost:8080/api/conversations/${conversationId}`);
+        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/conversations/${conversationId}`);
         
         if (response.ok) {
           const { conversation } = await response.json();
@@ -662,7 +662,7 @@ export default function ChatPage() {
     setIsSending(true);
 
     try {
-      const response = await fetch("http://localhost:8080/api/chat", {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -754,7 +754,7 @@ export default function ChatPage() {
     });
 
     try {
-      const response = await fetch("http://localhost:8080/api/store", {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/store`, {
         method: "POST",
         body: formData,
       });
@@ -772,7 +772,7 @@ export default function ChatPage() {
         // Associate with conversation
         if (result.documents?.length > 0) {
           const documentIds = result.documents.map((doc: any) => doc.id);
-          await fetch(`http://localhost:8080/api/conversations/${conversationId}/documents`, {
+          await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/conversations/${conversationId}/documents`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ documentIds }),

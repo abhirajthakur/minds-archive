@@ -55,7 +55,7 @@ export default function Page() {
     });
 
     try {
-      const response = await fetch("http://localhost:8080/api/store", {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/store`, {
         method: "POST",
         body: formData,
       });
@@ -104,7 +104,7 @@ export default function Page() {
     try {
       // Create conversation
       const conversationResponse = await fetch(
-        "http://localhost:8080/api/conversations",
+        `${process.env.NEXT_PUBLIC_API_URL}/api/conversations`,
         {
           method: "POST",
           headers: {
@@ -125,7 +125,7 @@ export default function Page() {
         const documentIds = uploadedDocuments.map((doc) => doc.id);
 
         const associateResponse = await fetch(
-          `http://localhost:8080/api/conversations/${currentConversationId}/documents`,
+          `${process.env.NEXT_PUBLIC_API_URL}/api/conversations/${currentConversationId}/documents`,
           {
             method: "POST",
             headers: {
