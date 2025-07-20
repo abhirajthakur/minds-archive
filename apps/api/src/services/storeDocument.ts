@@ -11,126 +11,113 @@ import { TextLoader } from "langchain/document_loaders/fs/text";
 import { RecursiveCharacterTextSplitter } from "langchain/text_splitter";
 
 export const getVectorStore = (): PrismaVectorStore<
-	Document,
-	"Document",
-	any,
-	any
+  Document,
+  "Document",
+  any,
+  any
 > => {
-	const embeddings = new GoogleGenerativeAIEmbeddings({
-		model: "embedding-001",
-		taskType: TaskType.RETRIEVAL_DOCUMENT,
-		apiKey: process.env.GOOGLE_API_KEY,
-	});
+  const embeddings = new GoogleGenerativeAIEmbeddings({
+    model: "embedding-001",
+    taskType: TaskType.RETRIEVAL_DOCUMENT,
+    apiKey: process.env.GOOGLE_API_KEY!,
+  });
 
-	const vectorStore = PrismaVectorStore.withModel<Document>(prisma).create(
-		embeddings,
-		{
-			prisma: Prisma,
-			tableName: "Document",
-			vectorColumnName: "vector",
-			columns: {
-				id: PrismaVectorStore.IdColumn,
-				content: PrismaVectorStore.ContentColumn,
-			},
-		},
-	);
-
-	return vectorStore;
+  return PrismaVectorStore.withModel<Document>(prisma).create(embeddings, {
+    prisma: Prisma,
+    tableName: "Document",
+    vectorColumnName: "vector",
+    columns: {
+      id: PrismaVectorStore.IdColumn,
+      content: PrismaVectorStore.ContentColumn,
+    },
+  });
 };
 
-const getLoaderForFile = (
-	file: Express.Multer.File,
+const getFileLoader = (
+  file: Express.Multer.File,
 ): BufferLoader | TextLoader => {
-	if (
-		file.mimetype ===
-		"application/vnd.openxmlformats-officedocument.presentationml.presentation"
-	) {
-		return new PPTXLoader(file.path);
-	} else if (
-		file.mimetype ===
-		"application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-	) {
-		return new DocxLoader(file.path);
-	} else if (file.mimetype === "application/pdf") {
-		return new PDFLoader(file.path);
-	} else {
-		return new TextLoader(file.path);
-	}
+  const { mimetype, path } = file;
+
+  switch (mimetype) {
+    case "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+      return new PPTXLoader(path);
+    case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+      return new DocxLoader(path);
+    case "application/pdf":
+      return new PDFLoader(path);
+    default:
+      return new TextLoader(path);
+  }
 };
 
-const processDocument = async (
-	file: Express.Multer.File,
-	vectorStore: PrismaVectorStore<Document, "Document", any, any>,
-) => {
-	try {
-		const loader = getLoaderForFile(file);
-		const docs = await loader.load();
-		console.log(`Loaded ${docs.length} documents`);
-		if (docs.length > 0) {
-			console.log("Sample content:", docs[0]?.pageContent.substring(0, 100));
-		}
+// === DOCUMENT PROCESSING ===
+const processFile = async (
+  file: Express.Multer.File,
+  vectorStore: PrismaVectorStore<Document, "Document", any, any>,
+  conversationId?: string,
+): Promise<Document[]> => {
+  const loader = getFileLoader(file);
+  const rawDocs = await loader.load();
 
-		const textSplitter = new RecursiveCharacterTextSplitter({
-			chunkSize: 1000,
-			chunkOverlap: 100,
-		});
+  if (rawDocs.length === 0) {
+    console.warn(`No content found in ${file.originalname}`);
+    return [];
+  }
 
-		const texts = await textSplitter.splitDocuments(docs);
-		console.log(`Split into ${texts.length} chunks`);
+  const splitter = new RecursiveCharacterTextSplitter({
+    chunkSize: 1000,
+    chunkOverlap: 100,
+  });
 
-		const validTexts = texts.filter(
-			(doc) =>
-				doc.pageContent &&
-				typeof doc.pageContent === "string" &&
-				doc.pageContent.trim() !== "",
-		);
-		console.log(`${validTexts.length} valid chunks after filtering`);
+  const chunks = await splitter.splitDocuments(rawDocs);
+  const validChunks = chunks.filter((doc) => doc.pageContent?.trim());
 
-		const createdDocs = await prisma.$transaction(
-			validTexts.map((doc) =>
-				prisma.document.create({
-					data: {
-						name: file.originalname,
-						content: doc.pageContent,
-						size: file.size,
-					},
-				}),
-			),
-		);
+  if (validChunks.length === 0) {
+    console.warn(`No valid chunks in ${file.originalname}`);
+    return [];
+  }
 
-		await vectorStore.addModels(createdDocs);
-	} catch (error) {
-		console.error(`Error processing document ${file.originalname}:`, error);
-	}
+  const savedDocs = await prisma.$transaction(
+    validChunks.map((chunk) =>
+      prisma.document.create({
+        data: {
+          name: file.originalname,
+          content: chunk.pageContent,
+          size: file.size,
+          conversationId: conversationId || null,
+        },
+      }),
+    ),
+  );
+
+  await vectorStore.addModels(savedDocs);
+  return savedDocs;
 };
 
-export const storeDocument = async (files: Express.Multer.File[]) => {
-	try {
-		const vectorStore = getVectorStore();
+export const storeDocuments = async (
+  files: Express.Multer.File[],
+  conversationId?: string,
+): Promise<Document[]> => {
+  const vectorStore = getVectorStore();
+  const allDocuments: Document[] = [];
 
-		await Promise.all(files.map((file) => processDocument(file, vectorStore)));
+  try {
+    const results = await Promise.allSettled(
+      files.map((file) => processFile(file, vectorStore, conversationId)),
+    );
 
-		console.log("Documents added successfully");
-		await checkDocuments();
-	} catch (error) {
-		console.error("Error in storeDocument:", error);
-		if (error instanceof Error) {
-			console.error("Error message:", error.message);
-			console.error("Error stack:", error.stack);
-		}
-	}
-};
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        allDocuments.push(...result.value);
+      } else {
+        console.error("Failed to process file:", result.reason);
+      }
+    }
 
-export const checkDocuments = async () => {
-	try {
-		const count = await prisma.document.count();
-		console.log(`Found ${count} documents in the database.`);
-
-		if (count > 0) {
-			const sample = await prisma.document.findFirst();
-			console.log("Sample document:", sample);
-		}
-	} catch (error) {
-		console.error("Error checking documents:", error);
-	}
+    console.log("All valid documents stored successfully");
+    return allDocuments;
+  } catch (err) {
+    console.error("Unexpected error in storeDocuments:", err);
+    throw err;
+  }
 };
